@@ -1,0 +1,249 @@
+<html>
+
+<head>
+  <title>HK Office Dashboard</title>
+  <meta charset='utf-8' />
+</head>
+
+<body>
+  <script type='text/javascript' src="https://public.tableau.com/javascripts/api/tableau_v8.js"></script>
+  <script type='text/javascript' src="https://apis.google.com/js/api.js"></script>
+  <script type='text/javascript' src="https://momentjs.com/downloads/moment.js"></script>
+  <script src="http://code.jquery.com/jquery-latest.min.js" type="text/javascript"></script>
+  <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+  <link rel="stylesheet" href="/resources/demos/style.css">
+  <script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+  <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+
+  <!--Add buttons to initiate auth sequence and sign out-->
+  <button id="authorize-button">Authorize</button>
+  <button id="signout-button">Sign Out</button>
+  <div id="tableauViz">
+    <button id="meetingButton" onclick="switchToMettingTab()" class="btn">Go to Meetings</button>
+  </div>
+  <div id="content"></div>
+  <div id="dialog-confirm" title="Meeting Alert!">
+    <p><span style="float:left; margin:12px 12px 20px 0;"></span>Upcoming Townhall Meeting Event in 15 min, Go to the
+      page?</p>
+  </div>
+
+  <script type="text/javascript">
+
+    //**** Call GSheets API ****//
+
+    var discoveryDocs = ["https://sheets.googleapis.com/$discovery/rest?version=v4"];
+    var clientId = '506571441059-ofjals5019b1jd7t1nqr2uui7dukahev.apps.googleusercontent.com';
+    var scopes = 'https://www.googleapis.com/auth/spreadsheets';
+    var authorizeButton = document.getElementById('authorize-button');
+    var signoutButton = document.getElementById('signout-button');
+    var resultReturned;
+    var tid;
+    var timerId;
+    var mId;
+    var rId;
+
+    function handleClientLoad() {
+      gapi.load('client:auth2', initClient);
+    }
+
+    function initClient() {
+      gapi.client.init({
+        discoveryDocs: discoveryDocs,
+        clientId: clientId,
+        scope: scopes
+      }).then(function () {
+        gapi.auth2.getAuthInstance().isSignedIn.listen(updateSigninStatus);
+        updateSigninStatus(gapi.auth2.getAuthInstance().isSignedIn.get());
+        authorizeButton.onclick = handleAuthClick;
+        signoutButton.onclick = handleSignoutClick;
+      });
+    }
+
+    function updateSigninStatus(isSignedIn) {
+      if (isSignedIn) {
+        authorizeButton.style.display = 'none';
+        signoutButton.style.display = 'block';
+        makeApiCall();
+        mId = setInterval(makeApiCall, 900000); //TODO: trigger to API call every 15 min
+        console.log('makeApiCall 1: ' + mId);
+      } else {
+        authorizeButton.style.display = 'block';
+        signoutButton.style.display = 'none';
+      }
+    }
+
+    function handleAuthClick(event) {
+      gapi.auth2.getAuthInstance().signIn();
+    }
+    function handleSignoutClick(event) {
+      gapi.auth2.getAuthInstance().signOut();
+    }
+
+    function makeApiCall() {
+      var params = {
+        spreadsheetId: '1LW5ncoMlu-3cHjOvzFWCOO1rCv9vteGKzvob7LA7_bA',
+        // The A1 notation of the values to retrieve.
+        range: 'Sheet1',
+        valueRenderOption: 'FORMATTED_VALUE',
+        dateTimeRenderOption: 'SERIAL_NUMBER',
+        majorDimension: 'ROWS',
+
+      };
+
+      var request = gapi.client.sheets.spreadsheets.values.get(params);
+      request.then(function (response) {
+        resultReturned = response.result.values;
+        console.log(resultReturned);
+
+        // internal checking on whether it is 5 min to meeting
+        tid = setInterval(checkMeeting, 30000); //TODO: Trigger every 30s to 5min
+        console.log('homepage: ' + tid);
+
+      }, function (reason) {
+        console.error('error: ' + reason.result.error.message);
+      });
+    }
+
+    //check meeting timer
+    function abortMeetingTimer() { // to be called when you want to stop the timer
+      console.log('aborted meeting timer: ' + tid);
+      clearInterval(tid);
+    }
+
+    //refresh meeting tab timer
+    function abortRefreshTimer() { // to be called when you want to stop the timer
+      console.log('aborted refresh: ' + rId);
+      clearInterval(rId);
+    }
+
+    //auto redirect to meeting tab timeout
+    function abortMeetingRedirect() {
+      console.log('aborted meeting redirect: ' + timerId);
+      clearTimeout(timerId);
+    }
+
+    //API call timer
+    function abortTimerApi() { // to be called when you want to stop the timer
+      console.log('aborted api timer: ' + mId);
+      clearInterval(mId);
+    }
+
+    function checkMeeting() {
+      var latestMeetingTime = resultReturned[1][1];
+
+      var now = new moment();
+      console.log('now: ' + now.format('LLL'));
+
+      var meetingtime = new moment(latestMeetingTime, 'MMMM DD, YYYY h:mm:ss a');
+      console.log('latest meeting: ' + meetingtime.format('LLL'));
+
+      var duration = moment.duration(now.diff(meetingtime)).asMinutes();
+      console.log('duration: ' + duration);
+      console.log('condition: ' + (duration <= 0 & duration >= -15));
+
+      if (duration <= 0 & duration >= -15) {
+        switchToMettingTab();
+      }
+
+    }
+
+    //**** Tableau Dashboard Rendering **** //
+
+    var viz, workbook;
+
+    function initializeViz() {
+      var placeholderDiv = document.getElementById("tableauViz");
+      var url = "https://tabapact.roche.com/views/HkOfficeDashboard_0/HKOfficedashboardMVP?iframeSizedToWindow=true&:embed=y&:showAppBanner=false&:display_count=no&:showVizHome=no";
+      //var url = "https://tabapact.roche.com/views/HkOfficeDashboard2/HKOfficedashboardMVP?iframeSizedToWindow=true&:embed=y&:showAppBanner=false&:display_count=no&:showVizHome=no";
+      var options = {
+        width: "100%",
+        height: "100%",
+        hideTabs: true,
+        hideToolbar: true,
+        onFirstInteractive: function () {
+          workbook = viz.getWorkbook();
+          activeSheet = workbook.getActiveSheet();
+          listenToTabsSwitch();
+        }
+      };
+
+      viz = new tableau.Viz(placeholderDiv, url, options);
+
+    }
+
+    $(initializeViz);
+
+
+    function listenToTabsSwitch() {
+      //console.log('wait here');
+      viz.addEventListener(tableau.TableauEventName.TAB_SWITCH, onSwitchSelection);
+    }
+
+    function onSwitchSelection(tabsEvent) {
+      if (tabsEvent.getNewSheetName() == 'HK Office dashboard MVP') {
+        abortRefreshTimer();
+        console.log('re-enter homepage');
+        // internal checking on whether it is 5 min to meeting
+        tid = setInterval(checkMeeting, 30000); //TODO: Trigger every 30s to 5min
+        console.log('Re-enter tid: ' + tid);
+      }
+    }
+
+    function RefreshViz() {
+      if (workbook.getActiveSheet().getName() == 'Meetings and Events ') {
+        viz.refreshDataAsync();
+        console.log('refreshed!');
+      }
+    }
+
+    // pop-up to to go to meeting tabs
+    function switchToMettingTab() {
+
+      var dialog = $("#dialog-confirm")
+        .dialog({
+          resizable: false,
+          height: "auto",
+          width: 400,
+          modal: true,
+          buttons: {
+            "Yes": function () {
+              intoMeetingTab();
+              $(this).dialog("close");
+            },
+            "No": function () {
+              abortMeetingRedirect();
+              $(this).dialog("close");
+            }
+          }
+
+        }
+        );
+
+      // redirect user to meeting tab, when there is no response on the pop up
+      timerId = setTimeout(function () {
+        dialog.dialog('close');
+        intoMeetingTab();
+      }, 30000); //TODO: Trigger every 30s to 5min
+
+      console.log('timer: ' + timerId);
+    }
+
+    function intoMeetingTab() {
+      workbook.activateSheetAsync("Meetings and Events ").then(function (newSheet) {
+        activeSheet = newSheet;
+        abortMeetingTimer();
+        abortMeetingRedirect();
+        abortTimerApi();
+
+        //refresh meeting tab
+        rId = setInterval(RefreshViz, 30000); //TODO: Trigger every 30s to 5min
+      });
+    }
+
+  </script>
+  <script async defer src="https://apis.google.com/js/api.js" onload="this.onload=function(){};handleClientLoad()"
+    onreadystatechange="if (this.readyState === 'complete') this.onload()">
+    </script>
+</body>
+
+</html>
